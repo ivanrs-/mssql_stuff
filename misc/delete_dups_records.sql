@@ -1,0 +1,86 @@
+-- Author: Ivan Ramos
+USE DataBaseName
+
+-- Table Ex: dbo.ops_notes
+-- Table fields: ID, Store, Pin, Contacted, Date_Completed, Notes
+-- Fields Used for duplicate validation: Store, Pin, Contacted, Date_Completed
+-- (the table may contain several fields, but only fields specified will be used as a 'complex index' to validate if the record has the same values)
+
+-- STEP 1.
+-- VERIFY DUP ROWS IN OPS_NOTES TABLE 
+-- USING STORE, PIN, CONTACTED AND NOTES 
+SELECT STORE, PIN, CONTACTED, CONVERT(VARCHAR(8),CAST(DATE_COMPLETED as date), 112) as DATE_COMPLETED, COUNT(*) as DUPS
+FROM DBO.OPS_NOTES
+WHERE FY = 2020
+-- FILTER BY CUSTOM VALUES IF NEEDED
+GROUP BY STORE, PIN, CONTACTED, DATE_COMPLETED
+HAVING COUNT(*) > 1
+
+-- ###########################################################################
+-- #### IF FIRST QUERY SHOWS RESULTS, THEN PROCEED WITH FOLLOWING ACTIONS ####
+
+-- STEP 2.
+-- IN CASE WE FOUND DUP RECORDS WITH FILTER CRITERIA
+-- SAVE DUPLICATED ROWS INTO #DUPS 
+-- FILTER MUST BE THE SAME 
+SELECT A.*
+INTO #DUPS
+FROM DBO.OPS_NOTES AS A JOIN
+        (
+		SELECT STORE, PIN, CONTACTED, CONVERT(VARCHAR(8),CAST(DATE_COMPLETED as date), 112) as DATE_COMPLETED, COUNT(*) as CNT
+        FROM DBO.OPS_NOTES
+        WHERE FY = 2020
+        GROUP BY STORE, PIN, CONTACTED,  CONVERT(VARCHAR(8),CAST(DATE_COMPLETED as date), 112)
+        HAVING COUNT(*) > 1 
+	) AS B ON A.STORE=B.STORE
+                AND A.PIN=B.PIN
+                AND A.CONTACTED=B.CONTACTED
+                AND CONVERT(VARCHAR(8),CAST(A.DATE_COMPLETED as date), 112)=CONVERT(VARCHAR(8),CAST(B.DATE_COMPLETED as date), 112)
+WHERE A.FY = 2020
+-- VIEW DUPLICATED ROWS
+SELECT *
+FROM #DUPS
+
+
+-- STEP 3.
+-- SAVE FIRST OCCURRENCE OF DUPS RECORDS INTO #DEDUPS
+SELECT MIN(ID) as ID
+INTO #DEDUPS
+FROM #DUPS
+GROUP BY store,pin
+-- VIEW DE-DUPLICATED ROWS
+SELECT *
+FROM #DEDUPS
+
+
+-- STEP 4.
+-- CREATE #DELETE_DUPS TABLE 
+-- GETTING ALL RECORDS FROM #DUPS THAT ARE NOT IN #DEDUPS 
+SELECT *
+INTO #DELETE_DUPS
+FROM #DUPS
+WHERE ID not in (SELECT ID
+FROM #DEDUPS )
+ORDER BY STORE,PIN,DATE_COMPLETED
+-- VIEW ROWS TO BE DELETED
+SELECT *
+FROM #DELETE_DUPS
+
+-- STEP 5.
+-- Take a back up if of current table before modifying
+SELECT *
+INTO dbo.ops_notes_bk
+FROM dbo.ops_notes
+
+-- STEP 6.
+-- Delete dups records from table
+-- Run with CAUTION!!
+DELETE FROM [dbo].[ops_notes]
+WHERE id in (SELECT ID
+FROM #DELETE_DUPS)
+
+-- STEP 7.
+-- DELETE TEMP TABLES
+DROP TABLE #DUPS
+DROP TABLE #DEDUPS
+DROP TABLE #DELETE_DUPS
